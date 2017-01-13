@@ -63,7 +63,7 @@ func (e *EngineHandler) Run(ctx *gin.Context) {
 	tool := e.tools.FindByName(toolName)
 	href := href(e.hostname, e.port, toolName)
 	status := "waiting"
-	toolsJson := map[string]interface{}{"name": toolName, "status": status, "conf": tool.Params(), "href": href}
+	toolsJson := map[string]interface{}{"name": toolName, "status": status, "conf": params, "href": href}
 	tool.Start(params)
 	ctx.JSON(201, gin.H{"tool": toolsJson})
 }

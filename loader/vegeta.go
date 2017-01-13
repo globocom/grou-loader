@@ -2,13 +2,13 @@ package loader
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/globocom/vegeta/lib"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
-	"gopkg.in/square/go-jose.v1/json"
 )
 
 type attackOpts struct {
@@ -46,10 +46,10 @@ func NewVegeta() *Vegeta {
 }
 
 type Vegeta struct {
-	name    string
-	running bool
-	params  map[string]interface{}
-	opts    *attackOpts
+	name       string
+	running    bool
+	params     map[string]interface{}
+	opts       *attackOpts
 }
 
 func (v *Vegeta) GetName() string {
@@ -57,8 +57,6 @@ func (v *Vegeta) GetName() string {
 }
 
 func (v *Vegeta) Start(params map[string]interface{}) {
-	defer func() { v.running = false }()
-	v.running = true
 	v.params = params
 	v.decodeParams()
 
@@ -74,6 +72,8 @@ func (v *Vegeta) Params() map[string]interface{} {
 }
 
 func (v *Vegeta) realStart() error {
+	defer func() { v.running = false }()
+
 	var (
 		tr  vegeta.Targeter
 		err error
@@ -82,13 +82,13 @@ func (v *Vegeta) realStart() error {
 	src := bytes.NewReader([]byte(v.opts.target))
 	body := []byte{}
 	if tr, err = vegeta.NewEagerTargeter(src, body, v.opts.headers.Header); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return err
 	}
 
 	atk := vegeta.NewAttacker(
 		vegeta.Redirects(v.opts.redirects),
 		vegeta.Timeout(v.opts.timeout),
-		vegeta.LocalAddr(*v.opts.laddr.IPAddr),
 		vegeta.Workers(v.opts.workers),
 		vegeta.KeepAlive(v.opts.keepalive),
 		vegeta.Connections(v.opts.connections),
@@ -99,13 +99,20 @@ func (v *Vegeta) realStart() error {
 		vegeta.StatsdPrefix(v.opts.statsd.prefix),
 	)
 
+	v.running = true
+
 	res := atk.Attack(tr, v.opts.rate, v.opts.duration)
+
+	fmt.Fprint(os.Stderr, "ATTACK\n")
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	for {
 		select {
 		case <-sig:
+			fmt.Fprint(os.Stderr, "STOPPED\n")
 			atk.Stop()
+			v.running = false
 			return nil
 		case _, ok := <-res:
 			if !ok {
@@ -113,10 +120,25 @@ func (v *Vegeta) realStart() error {
 			}
 		}
 	}
-
 }
 
 func (v *Vegeta) decodeParams() {
-	jsonStr, _ := json.Marshal(v.params)
-	json.Unmarshal(jsonStr, &v.opts)
+	v.opts.target, _ = v.params["target"].(string)
+	v.opts.http2, _ = v.params["http2"].(bool)
+	durationFloat, _ := v.params["duration"].(float64)
+	v.opts.duration = time.Duration(durationFloat) * time.Second
+	timeoutFloat, _ := v.params["timeout"].(float64)
+	v.opts.timeout = time.Duration(timeoutFloat) * time.Second
+	rateFloat, _ := v.params["rate"].(float64)
+	v.opts.rate = uint64(rateFloat)
+	workersFloat, _ := v.params["workers"].(float64)
+	v.opts.workers = uint64(workersFloat)
+	connectionsFloat, _ := v.params["connections"].(float64)
+	v.opts.connections = int(connectionsFloat)
+	redirectsFloat, _ := v.params["redirects"].(float64)
+	v.opts.redirects = int(redirectsFloat)
+	v.opts.headers, _ = v.params["headers"].(headers)
+	v.opts.laddr, _ = v.params["laddr"].(localAddr)
+	v.opts.keepalive, _ = v.params["keepalive"].(bool)
+	v.opts.statsd, _ = v.params["statsd"].(statsdOpts)
 }
